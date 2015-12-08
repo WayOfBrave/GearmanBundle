@@ -18,6 +18,7 @@ use Mmoreram\GearmanBundle\GearmanMethods;
 use Mmoreram\GearmanBundle\Generator\UniqueJobIdentifierGenerator;
 use Mmoreram\GearmanBundle\Module\JobStatus;
 use Mmoreram\GearmanBundle\Service\Abstracts\AbstractGearmanService;
+use Psr\Log\LoggerInterface;
 
 /**
  * GearmanClient. Implementation of AbstractGearmanService
@@ -46,6 +47,20 @@ class GearmanClient extends AbstractGearmanService
      * Server set to define in what server must connect to
      */
     protected $servers = array();
+
+    /**
+     * @var int
+     *
+     * Gearman native client timeout for socket I/O activity.
+     */
+    protected $timeout = null;
+
+    /**
+     * @var int
+     *
+     * Number of retries on timeout
+     */
+    protected $timeoutRetry = 0;
 
     /**
      * @var array
@@ -81,6 +96,12 @@ class GearmanClient extends AbstractGearmanService
      * Return code from internal client.
      */
     protected $returnCode;
+
+
+    /**
+     * @var LoggerInterface
+     */
+    private $logger;
 
     /**
      * @return \GearmanClient
@@ -208,6 +229,44 @@ class GearmanClient extends AbstractGearmanService
     }
 
     /**
+     * Sets the timeout for socket I/O activity.
+     *
+     * @param int $timeout An interval of time in milliseconds
+     *
+     * @return GearmanClient Returns self object
+     */
+    public function setTimeout($timeout) {
+        $this->timeout = $timeout;
+        return $this;
+    }
+
+    /**
+     * Set number of retries after timeout
+     *
+     * @param int $timeoutRetry
+     *
+     * @return GearmanClient Returns self object
+     */
+    public function setTimeoutRetry($timeoutRetry)
+    {
+        $this->timeoutRetry = $timeoutRetry;
+        return $this;
+    }
+
+
+    /**
+     * Sets Logger
+     *
+     * @param LoggerInterface $logger
+     *
+     * @return GearmanClient Returns self object
+     */
+    public function setLogger(LoggerInterface $logger) {
+        $this->logger = $logger;
+        return $this;
+    }
+
+    /**
      * Get real worker from job name and enqueues the action given one
      *     method.
      *
@@ -237,20 +296,47 @@ class GearmanClient extends AbstractGearmanService
      * If he GarmanClient call is asyncronous, result value will be a handler.
      * Otherwise, will return job result.
      *
-     * @param array  $worker Worker definition
+     * @param array $worker Worker definition
      * @param string $params Parameters to send to job as string
      * @param string $method Method to execute
      * @param string $unique A unique ID used to identify a particular task
-     *
      * @return mixed Return result of the GearmanClient call
+     * @throws \Exception
      */
     protected function doEnqueue(array $worker, $params, $method, $unique)
     {
         $gearmanClient = $this->getNativeClient();
         $this->assignServers($gearmanClient);
 
-        $result = $gearmanClient->$method($worker['job']['realCallableName'], $params, $unique);
-        $this->returnCode = $gearmanClient->returnCode();
+        $result = false;
+
+        //following code we be executed at least once
+        //even if timeoutRetry is euqal to 0
+        $exception = null;
+        for ($i = 0; $i <= $this->timeoutRetry; $i++) {
+            //reset $exception to clear it before next retry
+            $exception = null;
+            try {
+                $result = $gearmanClient->$method($worker['job']['realCallableName'], $params, $unique);
+                $this->returnCode = $gearmanClient->returnCode();
+
+            } catch (\GearmanException $ex) {
+                $this->returnCode = $gearmanClient->returnCode();
+                if ($this->returnCode != GEARMAN_SUCCESS) {
+                    error_log('GearmanClient returnCode: ' . $this->returnCode);
+                    error_log('GearmanException: ' . $ex->getMessage());
+                    if ($this->logger) {
+                        $this->logger->error('GearmanClient returnCode: ' . $this->returnCode);
+                        $this->logger->error('GearmanException: ' . $ex->getMessage());
+                    }
+                }
+                $exception = $ex;
+            }
+        }
+        //Throw $exception if it is not null
+        if ($exception) {
+            throw $exception;
+        }
 
         $this->gearmanClient = null;
 
@@ -273,14 +359,43 @@ class GearmanClient extends AbstractGearmanService
             $servers = $this->servers;
         }
 
-        /**
-         * We include each server into gearman client
-         */
-        foreach ($servers as $server) {
+        //We need to use try/catch here to handle case when the server is down
+        try {
 
-            $gearmanClient->addServer($server['host'], $server['port']);
+            /**
+             * We include each server into gearman client
+             */
+            foreach ($servers as $server) {
+                $gearmanClient->addServer($server['host'], $server['port']);
+            }
+        } catch (\GearmanException $ex) {
+            error_log('GearmanException '.$ex->getMessage());
+            error_log('addServer ' . $server['host'] . ', ' . $server['port']);
+            if ($this->logger) {
+                $this->logger->error(
+                    'GearmanException adding ' . $server['host'] . ', ' . $server['port'] . ' server:' .
+                    $ex->getMessage()
+                );
+            }
         }
 
+        $this->assignTimeout($gearmanClient);
+
+        return $this;
+    }
+
+    /**
+     * Given a GearmanClient, set timeout
+     *
+     * @param \GearmanClient $gearmanClient Object to include servers
+     *
+     * @return GearmanClient Returns self object
+     */
+    protected function assignTimeout(\GearmanClient $gearmanClient)
+    {
+        if ($this->timeout) {
+            $gearmanClient->setTimeout($this->timeout);
+        }
         return $this;
     }
 
