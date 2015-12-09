@@ -323,8 +323,6 @@ class GearmanClient extends AbstractGearmanService
             } catch (\GearmanException $ex) {
                 $this->returnCode = $gearmanClient->returnCode();
                 if ($this->returnCode != GEARMAN_SUCCESS) {
-                    error_log('GearmanClient returnCode: ' . $this->returnCode);
-                    error_log('GearmanException: ' . $ex->getMessage());
                     if ($this->logger) {
                         $this->logger->error('GearmanClient returnCode: ' . $this->returnCode);
                         $this->logger->error('GearmanException: ' . $ex->getMessage());
@@ -369,8 +367,6 @@ class GearmanClient extends AbstractGearmanService
                 $gearmanClient->addServer($server['host'], $server['port']);
             }
         } catch (\GearmanException $ex) {
-            error_log('GearmanException '.$ex->getMessage());
-            error_log('addServer ' . $server['host'] . ', ' . $server['port']);
             if ($this->logger) {
                 $this->logger->error(
                     'GearmanException adding ' . $server['host'] . ', ' . $server['port'] . ' server:' .
