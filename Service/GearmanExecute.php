@@ -25,6 +25,7 @@ use Mmoreram\GearmanBundle\Event\GearmanWorkStartingEvent;
 use Mmoreram\GearmanBundle\GearmanEvents;
 use Mmoreram\GearmanBundle\Service\Abstracts\AbstractGearmanService;
 use Mmoreram\GearmanBundle\Exceptions\ServerConnectionException;
+use Mmoreram\GearmanBundle\Helper\TCPHelper;
 use Symfony\Component\OptionsResolver\OptionsResolver;
 
 /**
@@ -338,11 +339,17 @@ class GearmanExecute extends AbstractGearmanService
         $successes = array();
 
         if (!empty($servers)) {
-
             foreach ($servers as $server) {
-                if (@$gmworker->addServer($server['host'], $server['port'])) {
-                    $successes[] = $server;
+                //We need to use try/catch here to handle case when the server is down
+                try {
+                    //before addServer check if server is available
+                    if(TCPHelper::tryConnection($server['host'], $server['port'])) {
+                        if (@$gmworker->addServer($server['host'], $server['port'])) {
+                            $successes[] = $server;
+                        }
+                    }
                 }
+                catch (\GearmanException $e) {}
             }
         } else {
             if (@$gmworker->addServer()) {
