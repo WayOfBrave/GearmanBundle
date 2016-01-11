@@ -18,6 +18,7 @@ use Mmoreram\GearmanBundle\GearmanMethods;
 use Mmoreram\GearmanBundle\Generator\UniqueJobIdentifierGenerator;
 use Mmoreram\GearmanBundle\Module\JobStatus;
 use Mmoreram\GearmanBundle\Service\Abstracts\AbstractGearmanService;
+use Mmoreram\GearmanBundle\Helper\TCPHelper;
 use Psr\Log\LoggerInterface;
 
 /**
@@ -357,21 +358,23 @@ class GearmanClient extends AbstractGearmanService
             $servers = $this->servers;
         }
 
-        //We need to use try/catch here to handle case when the server is down
-        try {
-
-            /**
-             * We include each server into gearman client
-             */
-            foreach ($servers as $server) {
-                $gearmanClient->addServer($server['host'], $server['port']);
-            }
-        } catch (\GearmanException $ex) {
-            if ($this->logger) {
-                $this->logger->error(
-                    'GearmanException adding ' . $server['host'] . ', ' . $server['port'] . ' server:' .
-                    $ex->getMessage()
-                );
+        /**
+         * We include each server into gearman client
+         */
+        foreach ($servers as $server) {
+            //We need to use try/catch here to handle case when the server is down
+            try {
+                //before addServer check if server is available
+                if(TCPHelper::tryConnection($server['host'], $server['port'])) {
+                    $gearmanClient->addServer($server['host'], $server['port']);
+                }
+            } catch (\GearmanException $ex) {
+                if ($this->logger) {
+                    $this->logger->error(
+                        'GearmanException adding ' . $server['host'] . ', ' . $server['port'] . ' server:' .
+                        $ex->getMessage()
+                    );
+                }
             }
         }
 
