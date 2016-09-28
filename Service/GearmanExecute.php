@@ -62,6 +62,13 @@ class GearmanExecute extends AbstractGearmanService
     protected $executeOptionsResolver;
 
     /**
+     * Boolean to track if a system signal has been received
+     * @var boolean
+     */
+    protected $stopWorkSignalReceived;
+
+
+    /**
      * Construct method
      *
      * @param GearmanCacheWrapper $gearmanCacheWrapper GearmanCacheWrapper
@@ -78,12 +85,32 @@ class GearmanExecute extends AbstractGearmanService
                 'minimum_execution_time' => null,
                 'timeout'                => null,
             ))
-            ->setAllowedTypes(array(
-                'iterations'             => array('null', 'scalar'),
-                'minimum_execution_time' => array('null', 'scalar'),
-                'timeout'                => array('null', 'scalar'),
-            ))
-        ;
+	    ->setAllowedTypes('iterations', array('null', 'scalar'))
+            ->setAllowedTypes('minimum_execution_time', array('null', 'scalar'))
+            ->setAllowedTypes('timeout', array('null', 'scalar'));
+        
+
+        $this->stopWorkSignalReceived = false;
+
+        /**
+         * If the pcntl_signal exists, subscribe to the terminate and restart events for graceful worker stops.
+         */
+        if(false !== function_exists('pcntl_signal'))
+        {
+            declare(ticks = 1);
+            pcntl_signal(SIGTERM, array($this,"handleSystemSignal"));
+            pcntl_signal(SIGHUP,  array($this,"handleSystemSignal"));
+
+        }
+    }
+
+    /**
+     * Toggles that work should be stopped, we only subscribe to SIGTERM and SIGHUP
+     * @param int $signno Signal number
+     */
+    public function handleSystemSignal($signo)
+    {
+        $this->stopWorkSignalReceived = true;
     }
 
     /**
@@ -300,7 +327,7 @@ class GearmanExecute extends AbstractGearmanService
         /**
          * Executes GearmanWorker with all jobs defined
          */
-        while ($gearmanWorker->work()) {
+        while (false === $this->stopWorkSignalReceived && $gearmanWorker->work()) {
 
             $iterations--;
 
